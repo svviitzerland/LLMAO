@@ -8,7 +8,6 @@
 
 *One interface for all your LLM APIs, fast and simple*
 
-[![PyPI](https://img.shields.io/pypi/v/llmao?style=flat&logo=pypi&logoColor=white&label=PyPI)](https://pypi.org/project/llmao/)
 [![Python](https://img.shields.io/badge/python-3.9+-blue?style=flat&logo=python&logoColor=white)](https://pypi.org/project/llmao/)
 [![Rust](https://img.shields.io/badge/Built%20with-Rust-dea584?style=flat&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/github/license/svviitzerland/llmao?style=flat)](LICENSE)
