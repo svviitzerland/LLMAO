@@ -1,6 +1,6 @@
 [package]
 name = "llmao-py"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2021"
 description = "Lightweight LLM API Orchestrator - A fast, multi-provider LLM client with rate limiting and key rotation"
 license = "MIT"
