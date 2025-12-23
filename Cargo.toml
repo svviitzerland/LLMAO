@@ -1,5 +1,5 @@
 [package]
-name = "llmao"
+name = "llmao-py"
 version = "0.1.0"
 edition = "2021"
 description = "Lightweight LLM API Orchestrator - A fast, multi-provider LLM client with rate limiting and key rotation"
@@ -9,7 +9,7 @@ keywords = ["llm", "openai", "api", "python", "pyo3"]
 categories = ["api-bindings", "asynchronous"]
 
 [lib]
-name = "llmao"
+name = "llmao_py"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]

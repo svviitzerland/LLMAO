@@ -106,7 +106,7 @@ jobs:
     if: github.event_name == 'release'
     environment:
       name: pypi
-      url: https://pypi.org/p/llmao
+      url: https://pypi.org/p/llmao-py
     permissions:
       id-token: write
     steps:

@@ -3,7 +3,7 @@ requires = ["maturin>=1.7,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "llmao"
+name = "llmao-py"
 version = "0.1.0"
 description = "Lightweight LLM API Orchestrator - A fast, multi-provider LLM client with rate limiting and key rotation"
 readme = "README.md"
@@ -39,7 +39,7 @@ dev = [
 [tool.maturin]
 features = ["pyo3/extension-module"]
 python-source = "python"
-module-name = "llmao._llmao"
+module-name = "llmao_py._llmao"
 strip = true
 
 [tool.pytest.ini_options]

@@ -22,7 +22,7 @@ A unified Python interface for multiple LLM providers with automatic key rotatio
 ## Installation
 
 ```bash
-pip install llmao
+pip install llmao-py
 ```
 
 ## Quick Start
