@@ -12,7 +12,12 @@ pub struct Message {
     pub role: String,
 
     /// Message content (can be string or array of content parts)
+    #[serde(default)]
     pub content: MessageContent,
+
+    /// Reasoning content (some models like Cerebras use this instead of content)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<String>,
 
     /// Optional name for the message author
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -36,6 +41,12 @@ pub enum MessageContent {
 
     /// Array of content parts (for multimodal)
     Parts(Vec<ContentPart>),
+}
+
+impl Default for MessageContent {
+    fn default() -> Self {
+        MessageContent::Text(String::new())
+    }
 }
 
 impl MessageContent {
@@ -368,6 +379,7 @@ mod tests {
             vec![Message {
                 role: "user".to_string(),
                 content: MessageContent::Text("Hello".to_string()),
+                reasoning: None,
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,

@@ -226,6 +226,7 @@ impl StreamAccumulator {
         Message {
             role: self.role.unwrap_or_else(|| "assistant".to_string()),
             content: MessageContent::Text(self.content),
+            reasoning: None,
             name: None,
             tool_calls,
             tool_call_id: None,

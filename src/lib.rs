@@ -327,7 +327,22 @@ impl PyLlmClient {
 
             let message_dict = PyDict::new(py);
             message_dict.set_item("role", &choice.message.role)?;
-            message_dict.set_item("content", choice.message.content.to_string_content())?;
+
+            // Use content, or fall back to reasoning if content is empty
+            let content = {
+                let main_content = choice.message.content.to_string_content();
+                if main_content.is_empty() {
+                    choice.message.reasoning.clone().unwrap_or_default()
+                } else {
+                    main_content
+                }
+            };
+            message_dict.set_item("content", content)?;
+
+            // Also expose reasoning if present
+            if let Some(reasoning) = &choice.message.reasoning {
+                message_dict.set_item("reasoning", reasoning)?;
+            }
             choice_dict.set_item("message", message_dict)?;
 
             choices.append(choice_dict)?;
@@ -399,6 +414,7 @@ fn convert_messages(messages: &Bound<'_, PyList>) -> PyResult<Vec<Message>> {
         result.push(Message {
             role,
             content,
+            reasoning: None,
             name,
             tool_calls: None, // TODO: Handle tool calls
             tool_call_id,
