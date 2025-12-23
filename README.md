@@ -112,69 +112,13 @@ export OPENAI_API_KEY_3="sk-key3"
 
 ## Configuration
 
-Create a `config.json` in your project to configure models and API keys:
-
-### Format 1: Specific Model
-
-Configure individual models with their own keys:
-
-```json
-{
-  "cerebras/llama3.1-70b": {
-    "keys": ["csk-key1", "csk-key2", "csk-key3"],
-    "rotation_strategy": "round_robin"
-  },
-  "groq/llama-3.1-70b-versatile": {
-    "keys": ["gsk-key1"]
-  }
-}
-```
-
-### Format 2: Provider Level
-
-Configure multiple models from the same provider sharing keys:
-
-```json
-{
-  "cerebras": {
-    "models": ["llama3.1-70b", "llama3.3-70b"],
-    "keys": ["csk-key1", "csk-key2"],
-    "rotation_strategy": "round_robin"
-  }
-}
-```
-
-### Custom Providers
-
-For providers not in the built-in registry, specify `base_url`:
-
-```json
-{
-  "my_custom_llm/model-v1": {
-    "base_url": "https://api.custom.com/v1",
-    "keys": ["custom-key"],
-    "headers": {
-      "X-Custom-Header": "value"
-    }
-  }
-}
-```
-
-**Configuration Options:**
-- `keys` (required): List of API keys
-- `models` (for provider-level): List of model names
-- `rotation_strategy`: `"round_robin"` (default), `"random"`, or `"least_recently_used"`
-- `base_url`: Custom API endpoint (required for unknown providers)
-- `headers`: Custom HTTP headers
-- `param_mappings`: Map parameter names (e.g., `max_completion_tokens` → `max_tokens`)
-
-See [`CONFIG_EXAMPLES.md`](CONFIG_EXAMPLES.md) for more examples.
+LLMAO supports multiple configuration methods. See the [`examples/`](examples/) directory for complete, runnable code for each scenario.
 
 ## Contributing Providers
 
 Want to add a new provider to LLMAO's built-in registry? 
 
-The `providers.json` file contains provider metadata (base URLs, default headers, etc.). Fork the repository, add your provider, and submit a pull request:
+The `registry.json` file contains provider metadata (base URLs, default headers, etc.). Fork the repository, add your provider, and submit a pull request:
 
 ```json
 {

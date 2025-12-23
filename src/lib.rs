@@ -22,7 +22,7 @@ use router::{KeyPool, ModelRoute};
 
 /// The main LLM client
 pub struct LlmClient {
-    /// Provider registry (metadata from providers.json)
+    /// Provider registry (metadata from registry.json)
     provider_registry: config::ProviderRegistry,
 
     /// Expanded model configurations (provider/model -> config)
@@ -267,12 +267,20 @@ struct PyLlmClient {
 impl PyLlmClient {
     /// Create a new client
     #[new]
-    #[pyo3(signature = (config_path=None))]
-    fn new(config_path: Option<&str>) -> PyResult<Self> {
+    #[pyo3(signature = (config_path=None, config=None))]
+    fn new(config_path: Option<&str>, config: Option<&Bound<'_, PyDict>>) -> PyResult<Self> {
         // Load .env file if present
         let _ = dotenvy::dotenv();
 
-        let inner = if let Some(path) = config_path {
+        let inner = if let Some(conf_dict) = config {
+             // Load from dictionary
+            let json_val = python_to_json(conf_dict.as_any())?;
+            let providers_config: config::ProvidersConfig = serde_json::from_value(json_val)
+                .map_err(|e| LlmaoError::Config(format!("Invalid config dict: {}", e)))?;
+            
+            let loader = ConfigLoader::from_config(providers_config)?;
+            LlmClient::from_loader(loader)?
+        } else if let Some(path) = config_path {
             LlmClient::with_config_path(path)?
         } else {
             LlmClient::new()?
@@ -562,7 +570,7 @@ fn completion(
     max_tokens: Option<u32>,
     kwargs: Option<&Bound<'_, PyDict>>,
 ) -> PyResult<Py<PyAny>> {
-    let client = PyLlmClient::new(None)?;
+    let client = PyLlmClient::new(None, None)?;
     client.completion(py, model, messages, temperature, max_tokens, None, kwargs)
 }
 

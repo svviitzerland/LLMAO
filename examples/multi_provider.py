@@ -1,60 +1,45 @@
+"""Example 2: Multiple Providers with Key Rotation
+
+Using a config.json file to manage multiple keys and providers.
 """
-Multi-provider example demonstrating fallback between providers.
+import json
+from llmao_py import LLMClient
 
-This example shows how to try multiple providers and fall back
-to the next one if the current one fails (e.g., rate limited).
-"""
+# Create a temporary config file for demonstration
+config = {
+    "cerebras": {
+        "models": ["llama3.1-70b", "llama3.3-70b"],
+        "keys": ["csk-key1", "csk-key2"],
+        "rotation_strategy": "round_robin"
+    },
+    "groq/llama-3.1-70b-versatile": {
+        "keys": ["gsk-key1"]
+    }
+}
 
-from llmao import LLMClient
+with open("demo_config.json", "w") as f:
+    json.dump(config, f, indent=2)
 
-# List of models to try in order (provider/model format)
-MODELS = [
-    "groq/llama-3.1-70b-versatile",
-    "cerebras/llama3.1-70b",
-    "together/meta-llama/Llama-3.3-70B-Instruct-Turbo",
-]
+print("Created demo_config.json")
 
-def completion_with_fallback(client, messages, **kwargs):
-    """Try multiple providers until one succeeds."""
-    last_error = None
-    
-    for model in MODELS:
-        try:
-            print(f"Trying {model}...")
-            response = client.completion(
-                model=model,
-                messages=messages,
-                **kwargs
-            )
-            print(f"Success with {model}")
-            return response
-        except RuntimeError as e:
-            print(f"Failed: {e}")
-            last_error = e
-            continue
-        except ValueError as e:
-            # Provider not found or invalid model
-            print(f"Skipping: {e}")
-            continue
-    
-    raise last_error or RuntimeError("All providers failed")
+# Initialize with config file
+client = LLMClient("demo_config.json")
 
-def main():
-    client = LLMClient()
-    
-    messages = [
-        {"role": "user", "content": "Say hello in 3 different languages."}
-    ]
-    
-    response = completion_with_fallback(
-        client,
-        messages,
-        temperature=0.7,
-        max_tokens=200
+print("\n--- Testing Cerebras (should rotate keys) ---")
+try:
+    # This might fail with invalid keys, but shows the usage
+    client.completion(
+        model="cerebras/llama3.1-70b",
+        messages=[{"role": "user", "content": "Hi"}]
     )
-    
-    print("\nResponse:")
-    print(response["choices"][0]["message"]["content"])
+except Exception as e:
+    print(f"Request failed (expected with fake keys): {e}")
 
-if __name__ == "__main__":
-    main()
+print("\n--- Testing Groq ---")
+try:
+    client.completion(
+        model="groq/llama-3.1-70b-versatile",
+        messages=[{"role": "user", "content": "Hi"}]
+    )
+except Exception as e:
+    print(f"Request failed (expected with fake keys): {e}")

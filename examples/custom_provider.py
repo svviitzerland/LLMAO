@@ -1,70 +1,32 @@
+"""Example 4: Custom Provider
+
+Using a provider that is NOT in the built-in registry.
 """
-Custom provider configuration example.
+from llmao_py import LLMClient
 
-This example shows how to configure custom providers and models
-using the new simplified configuration format.
-"""
-
-import json
-import tempfile
-import os
-from llmao import LLMClient
-
-# New custom configuration format
-CUSTOM_CONFIG = {
-    # Provider-level config: all models share the same keys
-    "groq": {
-        "models": ["llama-3.1-70b-versatile", "llama-3.3-70b-versatile"],
-        "keys": [
-            os.getenv("GROQ_API_KEY", "your-groq-key"),
-            os.getenv("GROQ_API_KEY_2", "your-groq-key-2")
-        ],
-        "rotation_strategy": "round_robin"
-    },
-    
-    # Specific model config with custom base_url
-    "my_custom_provider/my-model": {
-        "base_url": "https://api.my-provider.com/v1",
-        "keys": [os.getenv("MY_CUSTOM_API_KEY", "your-custom-key")],
+# Define custom provider config
+custom_config = {
+    "my_custom_llm/model-v1": {
+        "base_url": "https://api.openai.com/v1",  # Using OpenAI as a "custom" endpoint for demo
+        "keys": ["sk-placeholder"],
         "headers": {
-            "X-Custom-Header": "my-value"
+            "X-Custom-Header": "custom-value"
         },
         "param_mappings": {
-            "max_completion_tokens": "max_tokens"
+             "max_completion_tokens": "max_tokens"
         }
     }
 }
 
-def main():
-    # Write custom config to a temp file
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-        json.dump(CUSTOM_CONFIG, f)
-        config_path = f.name
-    
-    try:
-        # Create client with custom config
-        client = LLMClient(config_path=config_path)
-        
-        print("Available providers:")
-        for provider in client.providers():
-            info = client.provider_info(provider)
-            if info:
-                print(f"  - {provider}: {info['base_url']}")
-        
-        print("\nConfigured models:")
-        print("  - groq/llama-3.1-70b-versatile (2 keys, round robin)")
-        print("  - groq/llama-3.3-70b-versatile (2 keys, round robin)")
-        print("  - my_custom_provider/my-model (1 key)")
-        
-        # Example usage (uncomment if you have real keys):
-        # response = client.completion(
-        #     model="groq/llama-3.1-70b-versatile",
-        #     messages=[{"role": "user", "content": "Hello!"}]
-        # )
-        # print(response["choices"][0]["message"]["content"])
-        
-    finally:
-        os.unlink(config_path)
+client = LLMClient(config=custom_config)
 
-if __name__ == "__main__":
-    main()
+print("Sending request to custom provider...")
+try:
+    # Note: We use the full "provider/model" key here
+    response = client.completion(
+        model="my_custom_llm/model-v1",
+        messages=[{"role": "user", "content": "Hello!"}]
+    )
+    print(f"Response: {response}")
+except Exception as e:
+    print(f"Error: {e}")

@@ -49,7 +49,7 @@ pub struct ModelConfig {
 }
 
 /// Provider registry - maps provider names to their base configurations
-/// This is loaded from the built-in providers.json
+/// This is loaded from the built-in registry.json
 pub type ProviderRegistry = HashMap<String, ProviderConfig>;
 
 /// Configuration for a single LLM provider

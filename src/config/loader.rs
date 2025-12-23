@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 /// Configuration loader with support for multiple sources
 pub struct ConfigLoader {
-    /// Built-in provider registry (from providers.json)
+    /// Built-in provider registry (from registry.json)
     provider_registry: crate::config::provider::ProviderRegistry,
     /// User configuration (from config.json)
     config: ProvidersConfig,
@@ -45,12 +45,30 @@ impl ConfigLoader {
         Ok(loader)
     }
 
-    /// Load built-in provider registry from providers.json
+    /// Create a loader with an in-memory configuration
+    pub fn from_config(config: ProvidersConfig) -> Result<Self> {
+        let mut loader = Self {
+            provider_registry: HashMap::new(),
+            config: HashMap::new(),
+        };
+
+        loader.load_provider_registry()?;
+        loader.merge_config(config);
+        // Also try to load default paths to merge with, or should programmatic override everything?
+        // Usually programmatic is "instead of" or "on top of".
+        // Let's say programmatic is standalone for now to keep it simple and explicit.
+        // If they want to merge, they can load file first then merge dict (but we don't expose that yet).
+        // Let's stick to "programmatic config *replaces* file config" for the `config` arg usage.
+
+        Ok(loader)
+    }
+
+    /// Load built-in provider registry from registry.json
     fn load_provider_registry(&mut self) -> Result<()> {
-        let defaults = include_str!("../../providers.json");
+        let defaults = include_str!("../../registry.json");
         let registry: crate::config::provider::ProviderRegistry = serde_json::from_str(defaults)
             .map_err(|e| {
-                LlmaoError::Config(format!("Failed to parse built-in providers.json: {}", e))
+                LlmaoError::Config(format!("Failed to parse built-in registry.json: {}", e))
             })?;
 
         self.provider_registry = registry;
