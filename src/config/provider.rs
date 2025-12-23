@@ -6,15 +6,51 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Root configuration structure
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProvidersConfig {
-    /// Provider configurations keyed by provider name
-    pub providers: HashMap<String, ProviderConfig>,
+///
+/// Maps model keys to their configurations.
+/// Keys can be:
+/// - "provider/model" for specific models
+/// - "provider" for provider-level config with models array
+pub type ProvidersConfig = HashMap<String, ModelConfig>;
 
-    /// Optional key pool configurations
+/// Configuration for a model
+/// Can be either:
+/// - "provider/model": {...} (specific model)
+/// - "provider": {"models": [...], ...} (provider level)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelConfig {
+    /// Required: API keys for this model/provider
+    pub keys: Vec<String>,
+
+    /// Optional: List of model names (for provider-level config)
+    /// Ignored if key is "provider/model" format
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<String>,
+
+    /// Optional: Base URL (overrides provider default, required for custom providers)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+
+    /// Optional: Key rotation strategy
     #[serde(default)]
-    pub key_pools: HashMap<String, KeyPoolConfig>,
+    pub rotation_strategy: RotationStrategy,
+
+    /// Optional: Additional headers
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub headers: HashMap<String, String>,
+
+    /// Optional: Parameter mappings
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub param_mappings: HashMap<String, String>,
+
+    /// Optional: Rate limit configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rate_limit: Option<RateLimitConfig>,
 }
+
+/// Provider registry - maps provider names to their base configurations
+/// This is loaded from the built-in providers.json
+pub type ProviderRegistry = HashMap<String, ProviderConfig>;
 
 /// Configuration for a single LLM provider
 #[derive(Debug, Clone, Serialize, Deserialize)]

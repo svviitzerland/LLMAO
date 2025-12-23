@@ -92,62 +92,89 @@ client.completion(model="cerebras/llama3.1-70b", messages=[...])
 
 ## Key Rotation
 
-Automatic failover when rate limited. Set multiple keys via environment variables:
+Automatic failover when rate limited. Configure multiple keys in your `config.json`:
 
+```json
+{
+  "openai/gpt-4": {
+    "keys": ["sk-key1", "sk-key2", "sk-key3"],
+    "rotation_strategy": "round_robin"
+  }
+}
+```
+
+Or use environment variables (suffix with `_2`, `_3`, etc.):
 ```bash
 export OPENAI_API_KEY="sk-key1"
 export OPENAI_API_KEY_2="sk-key2"
 export OPENAI_API_KEY_3="sk-key3"
 ```
 
-Configure rotation strategy in your `config.json`:
-
-- `round_robin` - Rotate through keys sequentially
-- `least_recently_used` - Use the key that was used longest ago  
-- `random` - Pick a random key
-
 ## Configuration
 
-Create a `config.json` or `config.yml` in your project to customize settings:
+Create a `config.json` in your project to configure models and API keys:
+
+### Format 1: Specific Model
+
+Configure individual models with their own keys:
 
 ```json
 {
-  "providers": {
-    "my_provider": {
-      "base_url": "https://api.my-provider.com/v1",
-      "api_key_env": "MY_PROVIDER_API_KEY"
-    }
+  "cerebras/llama3.1-70b": {
+    "keys": ["csk-key1", "csk-key2", "csk-key3"],
+    "rotation_strategy": "round_robin"
   },
-  "key_pools": {
-    "openai": {
-      "keys_env": ["OPENAI_API_KEY", "OPENAI_API_KEY_2"],
-      "rotation_strategy": "round_robin"
+  "groq/llama-3.1-70b-versatile": {
+    "keys": ["gsk-key1"]
+  }
+}
+```
+
+### Format 2: Provider Level
+
+Configure multiple models from the same provider sharing keys:
+
+```json
+{
+  "cerebras": {
+    "models": ["llama3.1-70b", "llama3.3-70b"],
+    "keys": ["csk-key1", "csk-key2"],
+    "rotation_strategy": "round_robin"
+  }
+}
+```
+
+### Custom Providers
+
+For providers not in the built-in registry, specify `base_url`:
+
+```json
+{
+  "my_custom_llm/model-v1": {
+    "base_url": "https://api.custom.com/v1",
+    "keys": ["custom-key"],
+    "headers": {
+      "X-Custom-Header": "value"
     }
   }
 }
 ```
 
-Or use YAML format:
+**Configuration Options:**
+- `keys` (required): List of API keys
+- `models` (for provider-level): List of model names
+- `rotation_strategy`: `"round_robin"` (default), `"random"`, or `"least_recently_used"`
+- `base_url`: Custom API endpoint (required for unknown providers)
+- `headers`: Custom HTTP headers
+- `param_mappings`: Map parameter names (e.g., `max_completion_tokens` → `max_tokens`)
 
-```yaml
-providers:
-  my_provider:
-    base_url: https://api.my-provider.com/v1
-    api_key_env: MY_PROVIDER_API_KEY
-
-key_pools:
-  openai:
-    keys_env:
-      - OPENAI_API_KEY
-      - OPENAI_API_KEY_2
-    rotation_strategy: round_robin
-```
+See [`CONFIG_EXAMPLES.md`](CONFIG_EXAMPLES.md) for more examples.
 
 ## Contributing Providers
 
-Want to add a new provider to LLMAO? Fork the repository, add your provider to `provider.json`, and submit a pull request.
+Want to add a new provider to LLMAO's built-in registry? 
 
-The `provider.json` file in the repository contains the built-in provider definitions. Your contribution will be available to all users after merging.
+The `providers.json` file contains provider metadata (base URLs, default headers, etc.). Fork the repository, add your provider, and submit a pull request:
 
 ```json
 {
@@ -157,6 +184,8 @@ The `provider.json` file in the repository contains the built-in provider defini
   }
 }
 ```
+
+Once merged, all users can use your provider without specifying `base_url`!
 
 ## API Reference
 

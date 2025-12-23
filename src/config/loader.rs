@@ -9,6 +9,9 @@ use std::path::{Path, PathBuf};
 
 /// Configuration loader with support for multiple sources
 pub struct ConfigLoader {
+    /// Built-in provider registry (from providers.json)
+    provider_registry: crate::config::provider::ProviderRegistry,
+    /// User configuration (from config.json)
     config: ProvidersConfig,
 }
 
@@ -16,16 +19,14 @@ impl ConfigLoader {
     /// Create a new config loader and load from default locations
     pub fn new() -> Result<Self> {
         let mut loader = Self {
-            config: ProvidersConfig {
-                providers: HashMap::new(),
-                key_pools: HashMap::new(),
-            },
+            provider_registry: HashMap::new(),
+            config: HashMap::new(),
         };
 
-        // Load built-in defaults first
-        loader.load_builtin_defaults()?;
+        // Load built-in provider registry first
+        loader.load_provider_registry()?;
 
-        // Then load from file system (can override built-ins)
+        // Then load user config from file system
         loader.load_from_default_paths()?;
 
         Ok(loader)
@@ -34,26 +35,25 @@ impl ConfigLoader {
     /// Create a loader with a specific config file
     pub fn from_path(path: impl AsRef<Path>) -> Result<Self> {
         let mut loader = Self {
-            config: ProvidersConfig {
-                providers: HashMap::new(),
-                key_pools: HashMap::new(),
-            },
+            provider_registry: HashMap::new(),
+            config: HashMap::new(),
         };
 
-        loader.load_builtin_defaults()?;
+        loader.load_provider_registry()?;
         loader.load_from_file(path)?;
 
         Ok(loader)
     }
 
-    /// Load built-in provider defaults
-    fn load_builtin_defaults(&mut self) -> Result<()> {
+    /// Load built-in provider registry from providers.json
+    fn load_provider_registry(&mut self) -> Result<()> {
         let defaults = include_str!("../../providers.json");
-        let config: ProvidersConfig = serde_json::from_str(defaults).map_err(|e| {
-            LlmaoError::Config(format!("Failed to parse built-in providers.json: {}", e))
-        })?;
+        let registry: crate::config::provider::ProviderRegistry = serde_json::from_str(defaults)
+            .map_err(|e| {
+                LlmaoError::Config(format!("Failed to parse built-in providers.json: {}", e))
+            })?;
 
-        self.merge_config(config);
+        self.provider_registry = registry;
         Ok(())
     }
 
@@ -112,13 +112,14 @@ impl ConfigLoader {
 
     /// Merge another config into this one (later configs override earlier)
     fn merge_config(&mut self, other: ProvidersConfig) {
-        for (name, provider) in other.providers {
-            self.config.providers.insert(name, provider);
+        for (key, config) in other {
+            self.config.insert(key, config);
         }
+    }
 
-        for (name, pool) in other.key_pools {
-            self.config.key_pools.insert(name, pool);
-        }
+    /// Get the loaded provider registry
+    pub fn provider_registry(&self) -> &crate::config::provider::ProviderRegistry {
+        &self.provider_registry
     }
 
     /// Get the loaded configuration
@@ -135,10 +136,8 @@ impl ConfigLoader {
 impl Default for ConfigLoader {
     fn default() -> Self {
         Self::new().unwrap_or_else(|_| Self {
-            config: ProvidersConfig {
-                providers: HashMap::new(),
-                key_pools: HashMap::new(),
-            },
+            provider_registry: HashMap::new(),
+            config: HashMap::new(),
         })
     }
 }
@@ -152,7 +151,8 @@ mod tests {
     #[test]
     fn test_load_builtin_defaults() {
         let loader = ConfigLoader::new().unwrap();
-        assert!(!loader.config().providers.is_empty());
+        // Should have loaded provider registry
+        assert!(!loader.provider_registry().is_empty());
     }
 
     #[test]
@@ -161,48 +161,39 @@ mod tests {
         writeln!(
             file,
             r#"{{
-                "providers": {{
-                    "custom_provider": {{
-                        "base_url": "https://custom.api.com/v1",
-                        "api_key_env": "CUSTOM_API_KEY"
-                    }}
-                }},
-                "key_pools": {{}}
+                "custom_provider/model-v1": {{
+                    "keys": ["test-key-123"],
+                    "base_url": "https://custom.api.com/v1"
+                }}
             }}"#
         )
         .unwrap();
 
         let loader = ConfigLoader::from_path(file.path()).unwrap();
-        assert!(loader.config().providers.contains_key("custom_provider"));
+        assert!(loader.config().contains_key("custom_provider/model-v1"));
     }
 
     #[test]
     fn test_merge_configs() {
         let mut loader = ConfigLoader::new().unwrap();
-        let initial_count = loader.config().providers.len();
+        let initial_count = loader.config().len();
 
-        // Create a custom config that adds a new provider
-        let custom = ProvidersConfig {
-            providers: [(
-                "new_provider".to_string(),
-                crate::config::provider::ProviderConfig {
-                    base_url: "https://new.api.com".to_string(),
-                    api_key_env: Some("NEW_KEY".to_string()),
-                    api_keys_env: None,
-                    api_base_env: None,
-                    models: vec![],
-                    param_mappings: HashMap::new(),
-                    headers: HashMap::new(),
-                    rate_limit: None,
-                    special_handling: Default::default(),
-                },
-            )]
-            .into_iter()
-            .collect(),
-            key_pools: HashMap::new(),
-        };
+        // Create a custom config that adds a new model
+        let mut custom = HashMap::new();
+        custom.insert(
+            "new_provider/model-v1".to_string(),
+            crate::config::provider::ModelConfig {
+                keys: vec!["key1".to_string()],
+                models: vec![],
+                base_url: Some("https://new.api.com".to_string()),
+                rotation_strategy: Default::default(),
+                headers: HashMap::new(),
+                param_mappings: HashMap::new(),
+                rate_limit: None,
+            },
+        );
 
         loader.merge_config(custom);
-        assert_eq!(loader.config().providers.len(), initial_count + 1);
+        assert_eq!(loader.config().len(), initial_count + 1);
     }
 }

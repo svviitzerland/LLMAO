@@ -16,14 +16,18 @@ pub mod router;
 
 use api::{CompletionRequest, CompletionResponse, Message, MessageContent};
 use client::HttpClient;
-use config::{ConfigLoader, ProviderConfig, ProvidersConfig};
+use config::{ConfigLoader, ProviderConfig};
 use error::{LlmaoError, Result};
 use router::{KeyPool, ModelRoute};
 
 /// The main LLM client
 pub struct LlmClient {
-    /// Provider configurations
-    config: ProvidersConfig,
+    /// Provider registry (metadata from providers.json)
+    provider_registry: config::ProviderRegistry,
+    
+    /// Expanded model configurations (provider/model -> config)
+    #[allow(dead_code)] // Will be used for model-specific configuration lookups
+    model_configs: HashMap<String, config::ModelConfig>,
 
     /// API key pools per provider
     key_pools: HashMap<String, KeyPool>,
@@ -36,68 +40,80 @@ impl LlmClient {
     /// Create a new client with default configuration
     pub fn new() -> Result<Self> {
         let loader = ConfigLoader::new()?;
-        Self::from_config(loader.into_config())
+        Self::from_loader(loader)
     }
 
     /// Create a client with a custom config path
     pub fn with_config_path(path: &str) -> Result<Self> {
         let loader = ConfigLoader::from_path(path)?;
-        Self::from_config(loader.into_config())
+        Self::from_loader(loader)
     }
 
-    /// Create a client from a config object
-    fn from_config(config: ProvidersConfig) -> Result<Self> {
+    /// Create a client from a config loader
+    fn from_loader(loader: ConfigLoader) -> Result<Self> {
+        let provider_registry = loader.provider_registry().clone();
+        let user_config = loader.config().clone();
+        
+        // Expand user config into individual model configurations
+        let mut model_configs = HashMap::new();
         let mut key_pools = HashMap::new();
 
-        // Build key pools from provider configs and key_pools config
-        for (name, provider) in &config.providers {
-            let keys = provider.get_api_keys();
-            if !keys.is_empty() {
-                let strategy = config
-                    .key_pools
-                    .get(name)
-                    .map(|p| p.rotation_strategy.clone())
-                    .unwrap_or_default();
-
-                key_pools.insert(name.clone(), KeyPool::new(name.clone(), keys, strategy));
-            }
-        }
-
-        // Also check explicit key pools
-        for (name, pool_config) in &config.key_pools {
-            if !key_pools.contains_key(name) {
-                let mut keys = Vec::new();
-
-                // Load from env vars
-                for env in &pool_config.keys_env {
-                    if let Ok(key) = std::env::var(env) {
-                        keys.push(key);
-                    }
-                }
-
-                // Load raw keys
-                keys.extend(pool_config.keys.clone());
-
-                if !keys.is_empty() {
+        for (key, model_config) in user_config {
+            // Check if key contains "/" (specific model) or not (provider-level)
+            if key.contains('/') {
+                // Specific model: "provider/model"
+                let parts: Vec<&str> = key.splitn(2, '/').collect();
+                let provider_name = parts[0];
+                
+                // Create key pool for this provider if not exists
+                if !key_pools.contains_key(provider_name) && !model_config.keys.is_empty() {
                     key_pools.insert(
-                        name.clone(),
-                        KeyPool::new(name.clone(), keys, pool_config.rotation_strategy.clone()),
+                        provider_name.to_string(),
+                        KeyPool::new(
+                            provider_name.to_string(),
+                            model_config.keys.clone(),
+                            model_config.rotation_strategy.clone(),
+                        ),
                     );
+                }
+                
+                // Store model config
+                model_configs.insert(key.clone(), model_config);
+            } else {
+                // Provider-level: expand to multiple models
+                let provider_name = &key;
+                
+                // Create key pool for this provider
+                if !model_config.keys.is_empty() {
+                    key_pools.insert(
+                        provider_name.clone(),
+                        KeyPool::new(
+                            provider_name.clone(),
+                            model_config.keys.clone(),
+                            model_config.rotation_strategy.clone(),
+                        ),
+                    );
+                }
+                
+                // Expand each model
+                for model_name in &model_config.models {
+                    let model_key = format!("{}/{}", provider_name, model_name);
+                    model_configs.insert(model_key, model_config.clone());
                 }
             }
         }
 
         Ok(Self {
-            config,
+            provider_registry,
+            model_configs,
             key_pools,
             http_client: HttpClient::new()?,
         })
     }
 
-    /// Get a provider configuration
+    /// Get a provider configuration from registry
     fn get_provider(&self, name: &str) -> Result<&ProviderConfig> {
-        self.config
-            .providers
+        self.provider_registry
             .get(name)
             .ok_or_else(|| LlmaoError::ProviderNotFound(name.to_string()))
     }
@@ -213,16 +229,16 @@ impl LlmClient {
 
     /// List available providers
     pub fn providers(&self) -> Vec<String> {
-        self.config.providers.keys().cloned().collect()
+        self.provider_registry.keys().cloned().collect()
     }
 
     /// Get provider info
     pub fn provider_info(&self, name: &str) -> Option<ProviderInfo> {
-        self.config.providers.get(name).map(|p| ProviderInfo {
+        self.provider_registry.get(name).map(|p| ProviderInfo {
             name: name.to_string(),
             base_url: p.base_url.clone(),
             models: p.models.clone(),
-            has_keys: !p.get_api_keys().is_empty(),
+            has_keys: self.key_pools.contains_key(name),
         })
     }
 }

@@ -7,6 +7,6 @@ pub mod provider;
 
 pub use loader::ConfigLoader;
 pub use provider::{
-    KeyPoolConfig, ProviderConfig, ProvidersConfig, RateLimitConfig, RotationStrategy,
-    SpecialHandling,
+    KeyPoolConfig, ModelConfig, ProviderConfig, ProviderRegistry, ProvidersConfig, RateLimitConfig,
+    RotationStrategy, SpecialHandling,
 };
