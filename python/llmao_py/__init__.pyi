@@ -2,7 +2,7 @@
 Type stubs for LLMAO - Lightweight LLM API Orchestrator
 """
 
-from typing import Any, Iterator, Optional, TypedDict
+from typing import Any, Iterator, Optional, TypedDict, Union
 
 class Message(TypedDict, total=False):
     role: str
@@ -14,6 +14,11 @@ class Message(TypedDict, total=False):
 class Choice(TypedDict, total=False):
     index: int
     message: Message
+    finish_reason: Optional[str]
+
+class StreamChoice(TypedDict, total=False):
+    index: int
+    delta: dict[str, Any]
     finish_reason: Optional[str]
 
 class Usage(TypedDict):
@@ -29,29 +34,37 @@ class CompletionResponse(TypedDict, total=False):
     choices: list[Choice]
     usage: Optional[Usage]
 
-class ProviderInfo(TypedDict):
-    name: str
-    base_url: str
-    models: list[str]
-    has_keys: bool
+class StreamChunk(TypedDict, total=False):
+    id: str
+    object: str
+    created: int
+    model: str
+    choices: list[StreamChoice]
 
 class LLMClient:
     """
     Lightweight LLM API client with multi-provider support.
     
-    Args:
-        config_path: Optional path to a custom providers.json file.
-    
     Example:
         ```python
         from llmao import LLMClient
         
+        # Non-streaming
         client = LLMClient()
         response = client.completion(
             model="openai/gpt-4",
             messages=[{"role": "user", "content": "Hello!"}]
         )
         print(response["choices"][0]["message"]["content"])
+        
+        # Streaming
+        for chunk in client.completion(
+            model="cerebras/llama-3.3-70b",
+            messages=[{"role": "user", "content": "Hello!"}],
+            stream=True
+        ):
+            content = chunk["choices"][0]["delta"].get("content", "")
+            print(content, end="", flush=True)
         ```
     """
     
@@ -59,88 +72,57 @@ class LLMClient:
     
     def completion(
         self,
-        model: str,
-        messages: list[dict[str, Any]],
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
-        stream: Optional[bool] = None,
-        **kwargs: Any
-    ) -> CompletionResponse:
-        """
-        Create a chat completion.
-        
-        Args:
-            model: Model identifier in format "provider/model" or "provider/model/variant".
-                   Examples: "openai/gpt-4", "groq/llama-3.1-70b-versatile"
-            messages: List of message dicts with 'role' and 'content' keys.
-            temperature: Sampling temperature (0.0 to 2.0).
-            max_tokens: Maximum tokens to generate.
-            stream: Enable streaming (not yet implemented).
-            **kwargs: Additional provider-specific parameters.
-        
-        Returns:
-            CompletionResponse dict with id, choices, usage, etc.
-        
-        Raises:
-            ValueError: If model format is invalid or provider not found.
-            RuntimeError: If rate limited or no API keys available.
-            ConnectionError: If request fails.
-        """
-        ...
-    
-    def providers(self) -> list[str]:
-        """
-        List available provider names.
-        
-        Returns:
-            List of provider names (e.g., ["openai", "groq", "anthropic"])
-        """
-        ...
-    
-    def provider_info(self, name: str) -> Optional[ProviderInfo]:
-        """
-        Get information about a specific provider.
-        
-        Args:
-            name: Provider name (e.g., "openai")
-        
-        Returns:
-            ProviderInfo dict or None if provider not found.
-        """
-        ...
-    
-    def stream_completion(
-        self,
         messages: list[dict[str, Any]],
         model: Optional[str] = None,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
+        stream: bool = False,
+        tools: Optional[list[dict[str, Any]]] = None,
         **kwargs: Any
-    ) -> Iterator[dict[str, Any]]:
+    ) -> Union[CompletionResponse, Iterator[StreamChunk]]:
         """
-        Stream a chat completion, yielding chunks as they arrive.
+        Create a chat completion.
         
         Args:
             messages: List of message dicts with 'role' and 'content' keys.
             model: Model identifier in format "provider/model".
+                   Examples: "openai/gpt-4", "groq/llama-3.1-70b-versatile"
             temperature: Sampling temperature (0.0 to 2.0).
             max_tokens: Maximum tokens to generate.
+            stream: If True, returns iterator; if False, returns complete response.
+            tools: Tool definitions for function calling.
             **kwargs: Additional provider-specific parameters.
         
-        Yields:
-            Dict chunks with keys: id, model, created, content, role, 
-            finish_reason, index, tool_calls (optional).
+        Returns:
+            CompletionResponse dict if stream=False, Iterator[StreamChunk] if stream=True.
         
         Example:
             ```python
-            for chunk in client.stream_completion(
-                model="cerebras/llama-3.3-70b",
+            # Non-streaming
+            response = client.completion(
+                model="openai/gpt-4",
                 messages=[{"role": "user", "content": "Hello!"}]
+            )
+            print(response["choices"][0]["message"]["content"])
+            
+            # Streaming
+            for chunk in client.completion(
+                model="openai/gpt-4",
+                messages=[{"role": "user", "content": "Hello!"}],
+                stream=True
             ):
-                if "content" in chunk:
-                    print(chunk["content"], end="", flush=True)
+                if content := chunk["choices"][0]["delta"].get("content"):
+                    print(content, end="", flush=True)
             ```
         """
+        ...
+    
+    def providers(self) -> list[str]:
+        """List available provider names."""
+        ...
+    
+    def provider_info(self, name: str) -> Optional[dict[str, Any]]:
+        """Get information about a specific provider."""
         ...
 
 def completion(
@@ -148,29 +130,29 @@ def completion(
     messages: list[dict[str, Any]],
     temperature: Optional[float] = None,
     max_tokens: Optional[int] = None,
+    stream: bool = False,
     **kwargs: Any
-) -> CompletionResponse:
+) -> Union[CompletionResponse, Iterator[StreamChunk]]:
     """
     Quick completion without explicit client initialization.
-    
-    Args:
-        model: Model identifier in format "provider/model".
-        messages: List of message dicts.
-        temperature: Sampling temperature.
-        max_tokens: Maximum tokens to generate.
-        **kwargs: Additional parameters.
-    
-    Returns:
-        CompletionResponse dict.
     
     Example:
         ```python
         from llmao import completion
         
+        # Non-streaming
         response = completion(
             model="groq/llama-3.1-70b-versatile",
             messages=[{"role": "user", "content": "Hello!"}]
         )
+        
+        # Streaming  
+        for chunk in completion(
+            model="openai/gpt-4",
+            messages=[{"role": "user", "content": "Hello!"}],
+            stream=True
+        ):
+            print(chunk["choices"][0]["delta"].get("content", ""), end="")
         ```
     """
     ...

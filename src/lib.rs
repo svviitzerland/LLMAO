@@ -591,18 +591,23 @@ impl PyLlmClient {
         }
     }
 
-    /// Stream a completion request, yielding chunks as they arrive
+    /// Stream a completion request with a callback for each chunk
+    /// This enables true real-time streaming by calling the callback as chunks arrive
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (messages, model=None, temperature=None, max_tokens=None, **kwargs))]
-    fn stream_completion(
+    #[pyo3(signature = (callback, messages, model=None, temperature=None, max_tokens=None, tools=None, **kwargs))]
+    fn stream_with_callback(
         &self,
-        py: Python<'_>,
+        _py: Python<'_>,
+        callback: &Bound<'_, PyAny>,
         messages: &Bound<'_, PyList>,
         model: Option<&str>,
         temperature: Option<f32>,
         max_tokens: Option<u32>,
+        tools: Option<&Bound<'_, PyList>>,
         kwargs: Option<&Bound<'_, PyDict>>,
-    ) -> PyResult<Py<StreamIterator>> {
+    ) -> PyResult<()> {
+        use futures::StreamExt;
+
         // Resolve model
         let model_str = if let Some(m) = model {
             m.to_string()
@@ -625,6 +630,12 @@ impl PyLlmClient {
             request.max_tokens = Some(max);
         }
 
+        // Add tools if provided
+        if let Some(tools_list) = tools {
+            let tools_json = python_to_json(tools_list.as_any())?;
+            request.extra.insert("tools".to_string(), tools_json);
+        }
+
         // Add extra kwargs
         if let Some(extra) = kwargs {
             for (key, value) in extra.iter() {
@@ -634,93 +645,152 @@ impl PyLlmClient {
             }
         }
 
-        // Run streaming completion synchronously
+        // Get client and model for async block
         let client = self.inner.clone();
-        let chunks = self
-            .runtime
-            .block_on(async move { client.completion_stream(&model_str, request).await })?;
+        let model_for_stream = model_str.clone();
 
-        // Create iterator with collected chunks
-        Py::new(py, StreamIterator::new(chunks))
-    }
-}
+        // Stream with callback - we need to call into Python for each chunk
+        // Run the streaming in the runtime, calling back to Python for each chunk
+        self.runtime.block_on(async {
+            let route = ModelRoute::parse(&model_for_stream)?;
+            let provider_config = client.get_provider(&route.provider)?;
 
-/// Python iterator for streaming chunks
-#[pyclass]
-struct StreamIterator {
-    chunks: Vec<api::StreamChunk>,
-    index: usize,
-}
-
-impl StreamIterator {
-    fn new(chunks: Vec<api::StreamChunk>) -> Self {
-        Self { chunks, index: 0 }
-    }
-}
-
-#[pymethods]
-impl StreamIterator {
-    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
-        slf
-    }
-
-    fn __next__(&mut self, py: Python<'_>) -> Option<Py<PyDict>> {
-        if self.index >= self.chunks.len() {
-            return None;
-        }
-
-        let chunk = &self.chunks[self.index];
-        self.index += 1;
-
-        let dict = PyDict::new(py);
-        dict.set_item("id", &chunk.id).ok()?;
-        dict.set_item("model", &chunk.model).ok()?;
-        dict.set_item("created", chunk.created).ok()?;
-
-        // Extract content from first choice delta
-        if let Some(choice) = chunk.choices.first() {
-            if let Some(content) = &choice.delta.content {
-                dict.set_item("content", content).ok()?;
+            // Build request body with stream=true
+            let mut body = serde_json::to_value(&request)?;
+            if let Some(obj) = body.as_object_mut() {
+                obj.insert(
+                    "model".to_string(),
+                    serde_json::Value::String(route.model_id()),
+                );
+                obj.insert("stream".to_string(), serde_json::Value::Bool(true));
             }
-            if let Some(role) = &choice.delta.role {
-                dict.set_item("role", role).ok()?;
-            }
-            if let Some(reason) = &choice.finish_reason {
-                dict.set_item("finish_reason", reason).ok()?;
-            }
-            dict.set_item("index", choice.index).ok()?;
 
-            // Include tool call deltas if present
-            if let Some(tool_calls) = &choice.delta.tool_calls {
-                let tc_list = PyList::empty(py);
-                for tc in tool_calls {
-                    let tc_dict = PyDict::new(py);
-                    tc_dict.set_item("index", tc.index).ok()?;
-                    if let Some(id) = &tc.id {
-                        tc_dict.set_item("id", id).ok()?;
+            // Apply parameter mappings
+            provider_config.apply_param_mappings(&mut body);
+
+            // Build URL
+            let base_url = provider_config.get_base_url();
+            let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+
+            // Build extra headers
+            let extra_headers = if provider_config.headers.is_empty() {
+                None
+            } else {
+                let mut headers = reqwest::header::HeaderMap::new();
+                for (key, value) in &provider_config.headers {
+                    if let (Ok(name), Ok(val)) = (
+                        reqwest::header::HeaderName::try_from(key.as_str()),
+                        reqwest::header::HeaderValue::from_str(value),
+                    ) {
+                        headers.insert(name, val);
                     }
-                    if let Some(t) = &tc.call_type {
-                        tc_dict.set_item("type", t).ok()?;
-                    }
-                    if let Some(func) = &tc.function {
-                        let func_dict = PyDict::new(py);
-                        if let Some(name) = &func.name {
-                            func_dict.set_item("name", name).ok()?;
-                        }
-                        if let Some(args) = &func.arguments {
-                            func_dict.set_item("arguments", args).ok()?;
-                        }
-                        tc_dict.set_item("function", func_dict).ok()?;
-                    }
-                    tc_list.append(tc_dict).ok()?;
                 }
-                dict.set_item("tool_calls", tc_list).ok()?;
-            }
-        }
+                Some(headers)
+            };
 
-        Some(dict.into())
+            // Get API key
+            let api_key = client.get_api_key(&route.provider)?;
+
+            // Make streaming request
+            let mut stream = client
+                .http_client
+                .post_stream(&url, &body, &api_key, extra_headers.as_ref(), &route.provider)
+                .await?;
+
+            let mut buffer = String::new();
+
+            while let Some(result) = stream.next().await {
+                let bytes = result?;
+                buffer.push_str(&String::from_utf8_lossy(&bytes));
+
+                // Process complete lines
+                while let Some(newline_pos) = buffer.find('\n') {
+                    let line = buffer[..newline_pos].to_string();
+                    buffer = buffer[newline_pos + 1..].to_string();
+
+                    if let Some(chunk) = api::parse_sse_line(&line)? {
+                        // Call Python callback with chunk data
+                        // We need to acquire GIL to call Python
+                        Python::attach(|py| {
+                            let dict = PyDict::new(py);
+                            dict.set_item("id", &chunk.id).ok();
+                            dict.set_item("model", &chunk.model).ok();
+                            dict.set_item("created", chunk.created).ok();
+
+                            // Extract content from first choice delta
+                            if let Some(choice) = chunk.choices.first() {
+                                if let Some(content) = &choice.delta.content {
+                                    dict.set_item("content", content).ok();
+                                }
+                                if let Some(role) = &choice.delta.role {
+                                    dict.set_item("role", role).ok();
+                                }
+                                if let Some(reason) = &choice.finish_reason {
+                                    dict.set_item("finish_reason", reason).ok();
+                                }
+                                dict.set_item("index", choice.index).ok();
+
+                                // Include tool call deltas if present
+                                if let Some(tool_calls) = &choice.delta.tool_calls {
+                                    let tc_list = PyList::empty(py);
+                                    for tc in tool_calls {
+                                        let tc_dict = PyDict::new(py);
+                                        tc_dict.set_item("index", tc.index).ok();
+                                        if let Some(id) = &tc.id {
+                                            tc_dict.set_item("id", id).ok();
+                                        }
+                                        if let Some(t) = &tc.call_type {
+                                            tc_dict.set_item("type", t).ok();
+                                        }
+                                        if let Some(func) = &tc.function {
+                                            let func_dict = PyDict::new(py);
+                                            if let Some(name) = &func.name {
+                                                func_dict.set_item("name", name).ok();
+                                            }
+                                            if let Some(args) = &func.arguments {
+                                                func_dict.set_item("arguments", args).ok();
+                                            }
+                                            tc_dict.set_item("function", func_dict).ok();
+                                        }
+                                        tc_list.append(tc_dict).ok();
+                                    }
+                                    dict.set_item("tool_calls", tc_list).ok();
+                                }
+                            }
+
+                            // Call the Python callback
+                            callback.call1((dict,)).ok();
+                        });
+                    }
+                }
+            }
+
+            // Process remaining buffer
+            if !buffer.trim().is_empty() {
+                if let Some(chunk) = api::parse_sse_line(&buffer)? {
+                    Python::attach(|py| {
+                        let dict = PyDict::new(py);
+                        dict.set_item("id", &chunk.id).ok();
+                        if let Some(choice) = chunk.choices.first() {
+                            if let Some(content) = &choice.delta.content {
+                                dict.set_item("content", content).ok();
+                            }
+                            if let Some(reason) = &choice.finish_reason {
+                                dict.set_item("finish_reason", reason).ok();
+                            }
+                        }
+                        callback.call1((dict,)).ok();
+                    });
+                }
+            }
+
+            Ok::<(), LlmaoError>(())
+        })?;
+
+        Ok(())
     }
 }
+
 
 /// Convert Python list of message dicts to Rust Messages
 fn convert_messages(messages: &Bound<'_, PyList>) -> PyResult<Vec<Message>> {
@@ -869,7 +939,6 @@ fn completion(
 #[pymodule]
 fn _llmao(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyLlmClient>()?;
-    m.add_class::<StreamIterator>()?;
     m.add_function(wrap_pyfunction!(completion, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
